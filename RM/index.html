@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Camera Capture — Simple HTML</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;margin:0}
+    body{display:flex;flex-direction:column;gap:12px;align-items:center;padding:18px}
+    .camera {display:grid;grid-template-columns:1fr;gap:8px;max-width:720px;width:100%}
+    video{width:100%;height:auto;border-radius:12px;background:#000}
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
+    button,select{padding:8px 12px;border-radius:8px;border:1px solid #ccc;background:#fff}
+    .thumbs{display:flex;gap:8px;flex-wrap:wrap}
+    .thumbs img{max-width:120px;border-radius:8px;border:1px solid #ddd}
+    .info{font-size:13px;color:#555}
+  </style>
+</head>
+<body>
+  <h2>Camera Capture (HTML + JavaScript)</h2>
+  <div class="camera">
+    <video id="video" autoplay playsinline></video>
+    <div class="controls">
+      <select id="deviceSelect" aria-label="Choose camera"></select>
+      <button id="startBtn">Start Camera</button>
+      <button id="captureBtn">Capture Photo</button>
+      <button id="switchBtn">Switch Camera</button>
+      <button id="stopBtn">Stop Camera</button>
+      <a id="downloadLink" style="display:none">Download Last</a>
+    </div>
+    <div class="info">Tip: Allow camera permissions when prompted. "Switch Camera" toggles between available video input devices.</div>
+    <div class="thumbs" id="thumbs"></div>
+  </div>
+
+  <!-- Hidden canvas used for capturing the current video frame -->
+  <canvas id="canvas" style="display:none"></canvas>
+
+  <script>
+    // Elements
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const deviceSelect = document.getElementById('deviceSelect');
+    const startBtn = document.getElementById('startBtn');
+    const captureBtn = document.getElementById('captureBtn');
+    const switchBtn = document.getElementById('switchBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const thumbs = document.getElementById('thumbs');
+    const downloadLink = document.getElementById('downloadLink');
+
+    let currentStream = null;
+    let devices = [];
+    let currentDeviceIndex = 0;
+
+    // Request camera devices and populate deviceSelect
+    async function listVideoDevices() {
+      try {
+        const all = await navigator.mediaDevices.enumerateDevices();
+        devices = all.filter(d => d.kind === 'videoinput');
+        deviceSelect.innerHTML = '';
+        devices.forEach((d, i) => {
+          const opt = document.createElement('option');
+          opt.value = d.deviceId;
+          opt.text = d.label || `Camera ${i + 1}`;
+          deviceSelect.appendChild(opt);
+        });
+      } catch (err) {
+        console.error('Could not list devices', err);
+      }
+    }
+
+    // Start camera using an optional deviceId
+    async function startCamera(deviceId) {
+      stopCamera();
+      const constraints = {
+        video: deviceId ? {deviceId: {exact: deviceId}} : {facingMode: 'environment'},
+        audio: false
+      };
+
+      try {
+        currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = currentStream;
+        // If labels were empty before permission, refresh device list
+        await listVideoDevices();
+        // select the active device in the dropdown
+        const track = currentStream.getVideoTracks()[0];
+        const id = track.getSettings().deviceId || track.getSettings().groupId;
+        const index = devices.findIndex(d => d.deviceId === id);
+        if(index >= 0) deviceSelect.selectedIndex = index;
+      } catch (err) {
+        alert('Error starting camera: ' + err.message);
+        console.error(err);
+      }
+    }
+
+    function stopCamera() {
+      if (currentStream) {
+        currentStream.getTracks().forEach(t => t.stop());
+        currentStream = null;
+        video.srcObject = null;
+      }
+    }
+
+    // Capture current frame and create thumbnail + download link
+    function captureImage() {
+      if (!video.srcObject) return alert('Camera not started');
+      const width = video.videoWidth;
+      const height = video.videoHeight;
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, width, height);
+      // Convert to data URL (PNG). You can change 'image/jpeg' for smaller files.
+      canvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = 'Captured image';
+        // Add a small download button per thumbnail
+        const container = document.createElement('div');
+        container.style.display = 'flex';
+        container.style.flexDirection = 'column';
+        container.style.alignItems = 'center';
+
+        const dl = document.createElement('a');
+        dl.href = url;
+        dl.download = `capture_${Date.now()}.png`;
+        dl.textContent = 'Download';
+        dl.style.marginTop = '6px';
+
+        container.appendChild(img);
+        container.appendChild(dl);
+        thumbs.prepend(container);
+
+        // Update main download link too
+        downloadLink.href = url;
+        downloadLink.download = dl.download;
+        downloadLink.style.display = 'inline-block';
+        downloadLink.textContent = 'Download Last Capture';
+      }, 'image/png');
+    }
+
+    // Switch camera (cycles through devices)
+    function switchCamera() {
+      if (devices.length <= 1) return alert('No alternative camera found');
+      currentDeviceIndex = (currentDeviceIndex + 1) % devices.length;
+      const id = devices[currentDeviceIndex].deviceId;
+      startCamera(id);
+    }
+
+    // Event listeners
+    startBtn.addEventListener('click', () => startCamera(deviceSelect.value || undefined));
+    captureBtn.addEventListener('click', captureImage);
+    switchBtn.addEventListener('click', switchCamera);
+    stopBtn.addEventListener('click', stopCamera);
+    deviceSelect.addEventListener('change', () => startCamera(deviceSelect.value));
+
+    // On load: check support and populate devices
+    (async function init() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert('getUserMedia is not supported in this browser. Use a modern browser (Chrome, Edge, Firefox, Safari on iOS 11+).');
+        return;
+      }
+      await listVideoDevices();
+      // Auto-start the camera with default facingMode if available
+      startCamera();
+    })();
+
+    // Clean up when page unloads
+    window.addEventListener('pagehide', stopCamera);
+  </script>
+</body>
+</html>
