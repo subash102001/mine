@@ -1,0 +1,188 @@
+<!-- <!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Camera Capture + OneDrive Upload</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;margin:0}
+    body{display:flex;flex-direction:column;gap:12px;align-items:center;padding:18px}
+    .camera {display:grid;grid-template-columns:1fr;gap:8px;max-width:720px;width:100%}
+    video{width:100%;height:auto;border-radius:12px;background:#000}
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
+    button,select{padding:8px 12px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer}
+    .thumbs{display:flex;gap:8px;flex-wrap:wrap}
+    .thumbs img{max-width:120px;border-radius:8px;border:1px solid #ddd}
+    .info{font-size:13px;color:#555}
+  </style>
+</head>
+<body>
+  <h2>Camera Capture + OneDrive Upload</h2>
+  <div class="camera">
+    <video id="video" autoplay playsinline></video>
+
+    <div class="controls">
+      <select id="deviceSelect"></select>
+      <button id="startBtn">Start Camera</button>
+      <button id="captureBtn">Capture Photo</button>
+      <button id="switchBtn">Switch Camera</button>
+      <button id="stopBtn">Stop Camera</button>
+      <button id="signInBtn">Sign In OneDrive</button>
+    </div>
+
+    <div class="info">Captured images will auto-upload to OneDrive → /CameraUploads/</div>
+    <div class="thumbs" id="thumbs"></div>
+  </div>
+
+  <canvas id="canvas" style="display:none"></canvas>
+
+  MSAL for OneDrive Login
+  <script src="https://alcdn.msauth.net/browser/2.19.0/js/msal-browser.min.js"></script> -->
+
+  <!-- <script>
+    // ------------------ CAMERA SETUP -------------------
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const deviceSelect = document.getElementById('deviceSelect');
+    const startBtn = document.getElementById('startBtn');
+    const captureBtn = document.getElementById('captureBtn');
+    const switchBtn = document.getElementById('switchBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const thumbs = document.getElementById('thumbs');
+    const signInBtn = document.getElementById('signInBtn');
+
+    let currentStream = null;
+    let devices = [];
+    let currentDeviceIndex = 0;
+
+    async function listVideoDevices() {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      devices = all.filter(d => d.kind === 'videoinput');
+      deviceSelect.innerHTML = '';
+      devices.forEach((d, i) => {
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.text = d.label || `Camera ${i + 1}`;
+        deviceSelect.appendChild(opt);
+      });
+    }
+
+    async function startCamera(deviceId) {
+      stopCamera();
+      const constraints = {
+        video: deviceId ? {deviceId: {exact: deviceId}} : {facingMode: 'environment'},
+        audio: false
+      };
+      currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = currentStream;
+      await listVideoDevices();
+    }
+
+    function stopCamera() {
+      if (currentStream) {
+        currentStream.getTracks().forEach(t => t.stop());
+        currentStream = null;
+        video.srcObject = null;
+      }
+    }
+
+    function switchCamera() {
+      if (devices.length <= 1) return alert('No alternative camera found');
+      currentDeviceIndex = (currentDeviceIndex + 1) % devices.length;
+      startCamera(devices[currentDeviceIndex].deviceId);
+    }
+
+    // ------------------ ONEDRIVE AUTH ------------------
+    const msalConfig = {
+      auth: {
+        clientId: "YOUR_AZURE_CLIENT_ID",
+        redirectUri: window.location.href
+      }
+    };
+
+    const msalInstance = new msal.PublicClientApplication(msalConfig);
+    let accessToken = null;
+
+    async function signInOneDrive() {
+      const loginRequest = { scopes: ["Files.ReadWrite", "User.Read"] };
+      await msalInstance.loginPopup(loginRequest);
+      const token = await msalInstance.acquireTokenSilent(loginRequest);
+      accessToken = token.accessToken;
+      alert("✅ Signed in to OneDrive");
+    }
+
+    // ------------------ UPLOAD FUNCTION ------------------
+    async function uploadToOneDrive(blob) {
+      if (!accessToken) return alert("Sign in to OneDrive first!");
+
+      const fileName = `capture_${Date.now()}.png`;
+      const uploadUrl = `https://graph.microsoft.com/v1.0/me/drive/root:/CameraUploads/${fileName}:/content`;
+
+      const res = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Authorization": `Bearer ${accessToken}` },
+        body: blob
+      });
+
+      if (res.ok) {
+        alert("✅ Uploaded to OneDrive");
+      } else {
+        console.error(await res.text());
+        alert("❌ Upload failed");
+      }
+    }
+
+    // ------------------ CAPTURE IMAGE ------------------
+    function captureImage() {
+      if (!video.srcObject) return alert('Camera not started');
+
+      const width = video.videoWidth;
+      const height = video.videoHeight;
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, width, height);
+
+      canvas.toBlob(async blob => {
+        // Thumbnail display
+        const url = URL.createObjectURL(blob);
+        const img = document.createElement('img');
+        img.src = url;
+
+        const container = document.createElement('div');
+        container.style.display = 'flex';
+        container.style.flexDirection = 'column';
+        container.style.alignItems = 'center';
+
+        const dl = document.createElement('a');
+        dl.href = url;
+        dl.download = `capture_${Date.now()}.png`;
+        dl.textContent = 'Download';
+
+        container.appendChild(img);
+        container.appendChild(dl);
+        thumbs.prepend(container);
+
+        // Upload to OneDrive
+        uploadToOneDrive(blob);
+      }, 'image/png');
+    }
+
+    // ------------------ EVENT LISTENERS ------------------
+    startBtn.addEventListener('click', () => startCamera(deviceSelect.value));
+    stopBtn.addEventListener('click', stopCamera);
+    switchBtn.addEventListener('click', switchCamera);
+    captureBtn.addEventListener('click', captureImage);
+    deviceSelect.addEventListener('change', () => startCamera(deviceSelect.value));
+    signInBtn.addEventListener('click', signInOneDrive);
+
+    // Auto init
+    (async function init() {
+      await listVideoDevices();
+      startCamera();
+    })();
+
+    window.addEventListener('pagehide', stopCamera);
+  </script>
+</body>
+</html> -->
